@@ -1,7 +1,11 @@
 {
   "name": "n3-control-center",
   "version": "1.0.0",
-  "author": "Ihuri Barboza",
+  "author": {
+    "name": "Ihuri Barboza",
+    "email": "ihuri.barboza@adventistas.org"
+  },
+  "homepage": "https://github.com/ihuri/N3-Control-Center",
   "description": "Utilitário Desktop (macOS Menu Bar / Hidden Bar) e CLI para o mouse Darmoshark N3 via USB HID",
   "type": "module",
   "bin": {

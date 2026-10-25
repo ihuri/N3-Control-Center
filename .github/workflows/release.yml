@@ -74,13 +74,13 @@ jobs:
         include:
           - os: macos-latest
             target_name: macOS (DMG & ZIP)
-            builder_flag: --mac dmg zip
+            builder_flag: --mac
           - os: windows-latest
             target_name: Windows (EXE & Portable)
-            builder_flag: --win nsis portable
+            builder_flag: --win
           - os: ubuntu-latest
             target_name: Linux (AppImage & DEB)
-            builder_flag: --linux AppImage deb
+            builder_flag: --linux
 
     steps:
       - name: Checkout do repositório
@@ -96,7 +96,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libusb-1.0-0-dev libudev-dev
+          sudo apt-get install -y libusb-1.0-0-dev libudev-dev libarchive-tools
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
       - name: Injetar versão SemVer no package.json
         run: |
