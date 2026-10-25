@@ -1,161 +1,241 @@
-# N3 Control Center (App Desktop macOS + CLI `n3ctl`)
+# Darmoshark N3 Control Center — Driver & App Desktop (macOS, Linux & Windows)
 
-Aplicativo Desktop nativo para **macOS** (**Electron + React 19 + Tailwind CSS 4**) com integração **Menu Bar Híbrida / Hidden Bar** e utilitário de linha de comando (`n3ctl` via `node-hid`) para configurar e monitorar o mouse **Darmoshark N3** (sensor PixArt PAW3395 / MCU Telink `0x248A`), construído a partir da engenharia reversa 100% completa (`31/31` call sites HID) do instalador oficial Windows `Darmoshark N3 Mouse1.0.7.2.exe`.
+<p align="center">
+  <img src="public/oem/logo.png" alt="Darmoshark Logo" width="180" />
+</p>
 
-## Destaques do Aplicativo macOS
+<p align="center">
+  <strong>O driver e centro de controle definitivo de código aberto para o mouse Darmoshark N3 (PixArt PAW3395)</strong><br />
+  Port multiplataforma desenvolvido para <strong>macOS</strong> (com Menu Bar nativa), <strong>Linux</strong> e <strong>Windows</strong> a partir da engenharia reversa do software original.
+</p>
 
-- **Réplica 1:1 da Interface Original em Alta Definição (Retina)**:
-  - Utiliza os recursos gráficos reais extraídos do instalador oficial (`public/oem/*`: emblema Darmoshark, ícones laterais `menu_key`, `menu_pointer`, `menu_macro`, `menu_sysset`, bateria `power0..7` e foto 3D do N3) combinados com tipografia vetorial nítida em **PT-BR** e **EN** (sem aba RGB na interface gráfica).
-  - **5 Abas Completas**:
-    1. **Botões & Debounce (`0x52, 0x52` e `0x51, 0x43`)**: remapeamento dos 7 botões físicos com callouts interativos sobre o mouse 3D, gravador ao vivo de atalhos do macOS (`⌘ Cmd`, `⌥ Opt`, `⇧ Shift`, `⌃ Ctrl`, `F13..F24`), presets macOS, multimídia, ciclo de DPI, *Turbo / Fire Key*, brilho de tela, vínculo de macros e ajuste de *Keypress Response* (`0..20 ms`).
-    2. **Ponteiro, DPI & Report Rate (`0x51, 0x40` e `0x51, 0x41`)**: até 5 estágios (`50..26000` DPI) com as cores oficiais de LED (`#F10900`, `#056BE2`, `#09F148`, `#B606FA`, `#ECF11D`), régua graduada com cursor `▲` laranja, entrada numérica exata e seletor `125HZ / 500HZ / 1000HZ`.
-    3. **Editor de Macros (`0x52, 0x55`)**: gravação ao vivo de teclado e cliques, modos de delay (*tempo real*, *fixo* ou *sem delay*), repetição (*enquanto segurar*, *toggle* ou *N vezes*) e upload paginado para a memória onboard do mouse.
-    4. **Sistema & Sensor PAW3395 (`0x51, 0x42`)**: *LOD Height* (`Low ~1mm` / `High ~2mm`), *Ripple Control*, *Angle Snap*, *Motion Sync* e atalho direto para os Ajustes de Mouse do macOS.
-    5. **Menu Bar Híbrida & Automações macOS (`⌘`)**:
-       - **Modo Híbrido na Menu Bar / Hidden Bar**: **Clique Esquerdo** abre o *Mini Control Center Popover* translúcido; **Clique Direito** (ou `Ctrl+Clique`) abre o menu nativo `NSMenu`; texto configurável com **`%` da Bateria** e **`DPI` atual** (`monospacedDigit`).
-       - **5 Automações Inteligentes**: *Auto-Eco* (reduz Polling Rate na bateria baixa ou no Modo Pouca Energia do macOS), **HUD translúcido na tela** ao trocar DPI pelos botões físicos `CPI+/CPI-` (`0x54 / 0xE2`), notificações nativas de bateria (`20%` e `10%`), **Perfis Automáticos por Aplicativo em Foco** e **Modo Dockless + Iniciar no Login**.
+<p align="center">
+  <a href="#-como-baixar-e-instalar">Como Instalar</a> •
+  <a href="#-capturas-de-tela-do-software">Capturas de Tela</a> •
+  <a href="#-recursos-principais">Recursos</a> •
+  <a href="#-utilitário-cli-n3ctl">CLI n3ctl</a> •
+  <a href="#-engenharia-reversa-com-rea-e-ghidra">Engenharia Reversa</a> •
+  <a href="#-documentação-técnica">Documentação Técnica</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Plataformas-macOS%20%7C%20Linux%20%7C%20Windows-blue?style=flat-square" alt="Platforms" />
+  <img src="https://img.shields.io/badge/Sensor-PixArt%20PAW3395-orange?style=flat-square" alt="Sensor" />
+  <img src="https://img.shields.io/badge/Stack-Electron%20%2B%20React%2019%20%2B%20Tailwind%204-purple?style=flat-square" alt="Stack" />
+  <img src="https://img.shields.io/badge/Testes-18%2F18%20Passando-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=flat-square" alt="License" />
+</p>
 
 ---
 
-## Executando o Aplicativo Desktop no macOS
+## 📌 Sobre o Projeto
 
+Originalmente, o mouse gamer **Darmoshark N3 (Trio-Mode: Cabo USB, 2.4GHz e Bluetooth)** possui driver de configuração proprietário disponibilizado pelo fabricante **apenas para sistemas Windows**. O software oficial e o manual do usuário podem ser consultados diretamente no [site oficial da Darmoshark](https://darmoshark.com/products/darmoshark-n3-horn-shark-trio-mode-game-mouse).
+
+Este projeto é um **port independente, multiplataforma e de alta fidelidade** do aplicativo oficial:
+- **macOS nativo**: Interface visual rica (Retina), atalhos de teclado do Mac (`⌘ Cmd`, `⌥ Opt`, `⌃ Ctrl`, `⇧ Shift`), integração com a **Barra de Menus (Menu Bar / Hidden Bar)** com ícone dinâmico de bateria e notificações em tempo real.
+- **Linux**: Suporte completo via `node-hid` / Electron para usuários Ubuntu, Fedora, Arch e distribuições compatíveis.
+- **Windows**: Alternativa moderna, limpa, sem bloatware ou serviços proprietários rodando em segundo plano.
+
+> **Transparência e Fidelidade Técnica**: O port foi realizado através de engenharia reversa minuciosa do binário original `Darmoshark N3 Mouse1.0.7.2.exe` utilizando o **REA** (*Reverse Engineer Anything*) e o **NSA Ghidra**, mapeando com precisão de 100% todos os 31 pontos de chamada HID e buffers originais de hardware.
+
+---
+
+## 📸 Capturas de Tela do Software
+
+O visual reproduz com fidelidade 1:1 os assets oficiais de alta definição da Darmoshark (emblema, render 3D do mouse e ícones laterais), combinados a um design escuro moderno e responsivo:
+
+### 1. Configuração de DPI e Polling Rate
+> Régua graduada precisa de 50 a 26.000 DPI com as 5 cores de LED originais, alternância de estágios e seletor 125 Hz / 500 Hz / 1000 Hz.
+
+![Configuração de DPI e Polling Rate](doc/screenshots/mainwindow-pointer.png)
+
+---
+
+### 2. Remapeamento dos 7 Botões Físicos & Tempo de Resposta
+> Callouts interativos sobre o modelo 3D do Darmoshark N3, gravador de combos (`Cmd+C`, `Cmd+V`, etc.), atalhos multimídia, presets e ajuste de debounce (0 a 20 ms).
+
+![Remapeamento de Botões](doc/screenshots/mainwindow-buttons.png)
+
+---
+
+### 3. Editor Avançado de Macros Onboard
+> Gravação ao vivo de cliques e teclas, modos de delay (tempo real, fixo ou sem delay), tipos de repetição e gravação direta na memória flash do mouse.
+
+![Editor de Macros](doc/screenshots/mainwindow-macro.png)
+
+---
+
+### 4. Menu Bar Híbrida & Automações Inteligentes no macOS
+> Modo ecológico automático quando a bateria estiver fraca, HUD flutuante na tela ao trocar DPI pelos botões físicos e perfis automáticos por aplicativo (ex.: CS2, Blender, Final Cut).
+
+<p align="center">
+  <img src="doc/screenshots/mainwindow-automations.png" alt="Automações no macOS" width="68%" />
+  <img src="doc/screenshots/menubar-popover.png" alt="Mini Popover Menu Bar" width="28%" />
+</p>
+
+---
+
+## 🚀 Como Baixar e Instalar
+
+### 🍏 macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+
+#### Opção A: Executar via Código-Fonte (Recomendada para Desenvolvedores)
 ```bash
-# Modo Desenvolvimento (Vite HMR + Electron)
-npm run dev
+# 1. Clone o repositório
+git clone https://github.com/ihuribarboza/n3-control-center.git
+cd n3-control-center
 
-# Build de produção da UI + abrir aplicativo Electron
+# 2. Instale as dependências (Node.js >= 20 necessário)
+npm install
+
+# 3. Inicie o aplicativo desktop
 npm start
+```
 
-# Gerar pacote nativo macOS (.app em release/mac-arm64/N3 Control Center.app)
+#### Opção B: Gerar Instalador Nativo `.dmg` ou `.app`
+```bash
+# Gerar pacote .app descompactado em release/mac-arm64/
 npm run pack:mac
 
-# Gerar instalador .dmg para macOS
+# Gerar arquivo instalador .dmg para distribuir
 npm run dist:mac
 ```
+Após gerar, abra a pasta `release/` e arraste o **N3 Control Center.app** para a pasta `/Applications`.
 
-Para instalar no macOS, basta mover `release/mac-arm64/N3 Control Center.app` para a pasta `/Applications`.
-
-## Recursos Suportados
-
-- **Conexão Dual (Cabo USB e Receptor 2.4GHz)**:
-  - **Modo Com Fio**: `VID 0x248A`, `PID 0xFF10`, `UsagePage 0xFFC1`, `Usage 0x0001`
-  - **Modo Sem Fio 2.4GHz**: `VID 0x248A`, `PID 0xFF11`, `UsagePage 0xFFC0`, `Usage 0x0001`
-  - Por operar sobre *Vendor-Defined Usage Pages* (`0xFFC1` / `0xFFC0`), o `IOHIDFamily` do macOS permite abrir a interface de controle sem conflito exclusivo com o driver nativo de cursor do sistema.
-- **Ajuste de DPI (`0x51, 0x40`)**: até 5 estágios (`50..26000` DPI em `uint16` little-endian), quantidade de estágios no ciclo (`1..5`) e seleção imediata do estágio ativo.
-- **Polling Rate (`0x51, 0x41`)**: `125 Hz`, `500 Hz` e `1000 Hz`, respeitando automaticamente a diferença de offset entre cabo (`buf[2]`) e receptor 2.4GHz (`buf[3]`).
-- **Debounce Time / Keypress Response (`0x51, 0x43`)**: ajuste fino de `0` a `20 ms` (padrão de fábrica: `8 ms`).
-- **LOD e Recursos PAW3395 (`0x51, 0x42`)**: *Lift-Off Distance* (`low` ~1mm / `high` ~2mm), *Ripple Control*, *Angle Snapping* e *Motion Sync*.
-- **Iluminação RGB (`0x51, 0x22..0x27`)**: modos (`off`, `static`, `breathing`, `spectrum`, `wave`, `marquee`, `neon`), cor `#RRGGBB` / presets, brilho e velocidade.
-  - *Nota de hardware*: o executável oficial `darmoshark.exe` compartilha a base `Keychron_driver.pdb` e implementa todos os pacotes RGB, porém oculta a aba RGB na interface do Darmoshark N3 porque a carcaça padrão do N3 possui apenas o LED indicador de DPI/status.
-- **Remapeamento Completo dos 7 Botões (`0x52, 0x52` — 65B)**: suporte às 8 categorias originais (cliques/scroll de mouse, atalhos de teclado/macOS `Cmd/Ctrl/Opt/Shift`, multimídia, ciclo de DPI, iluminação, *Turbo / Fire Key*, atalhos de sistema e desativação de botão), além de reset dedicado de botões (`0x51, 0x0B, 0x01, 0x01`) e trava de segurança contra perda do último clique esquerdo.
-- **Macros Onboard Paginadas (`0x52, 0x55` — 65B)**: gravação na memória do mouse de sequências de até `255` eventos (`key-down/up`, `mouse-down/up`, `delay` em `uint16_le` e movimento relativo `int8`) em blocos de 13 eventos por pacote, nos modos *N repetições*, *enquanto pressionado* (`0x2001`) ou *alternar até próxima tecla* (`0x4001`).
-- **Leitura de Status e Monitoramento em Tempo Real**: leitura de firmware (`0x04`), porcentagem de bateria (`0x06`), tabela de DPI e polling ativos (`0x07`), ping 2.4GHz (`0x0C`) e escuta de *Input Reports* assíncronos (`0x54` / `0xE2` / `0xE3`).
+> ⚠️ **Permissão de Hardware no macOS**:
+> Caso o sistema bloqueie o acesso direto ao dispositivo HID, vá em:
+> **Ajustes do Sistema → Privacidade e Segurança → Monitoramento de Entrada (Input Monitoring)** e certifique-se de que o **N3 Control Center** (ou o seu Terminal) esteja autorizado.
 
 ---
 
-## Instalação
+### 🐧 Linux (Ubuntu, Debian, Fedora, Arch)
 
+1. Certifique-se de que sua conta possui acesso aos dispositivos USB HID brutos adicionando uma regra `udev`:
+```bash
+# Criar regra udev para o Telink MCU / Darmoshark N3 (VID 0x248A)
+echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="248a", MODE="0666"' | sudo tee /etc/udev/rules.d/99-darmoshark-n3.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+2. Inicie o aplicativo:
 ```bash
 npm install
+npm start
 ```
-
-Para executar globalmente no terminal como `n3ctl`:
-
-```bash
-npm link
-```
-
-### Permissões no macOS
-
-Caso o macOS bloqueie o acesso ao `IOHIDDevice`, abra **Ajustes do Sistema → Privacidade e Segurança → Monitoramento de Entrada** (*Input Monitoring*) e habilite o seu aplicativo de Terminal (Terminal, iTerm2, Warp, VS Code / Antigravity).
 
 ---
 
-## Uso Rápido
+### 🪟 Windows
+
+1. Clone o repositório e execute:
+```bash
+npm install
+npm start
+```
+*(Funciona perfeitamente lado a lado ou como substituto leve ao driver OEM).*
+
+---
+
+## ✨ Recursos Principais
+
+- 🔌 **Conexão Dual Transparente**: Alternância em tempo real entre **Cabo USB** (`VID 0x248A, PID 0xFF10`) e **Receptor Sem Fio 2.4GHz** (`VID 0x248A, PID 0xFF11`).
+- 🎯 **Sensor PixArt PAW3395**:
+  - Ajuste de **LOD** (*Lift-Off Distance*): Baixo (~1mm) ou Alto (~2mm).
+  - **Motion Sync**: Sincronização angular precisa com a taxa de leitura USB.
+  - **Ripple Control** & **Angle Snapping**: Suavização em altos DPIs e correção de linhas retas.
+- ⚡ **Taxa de Sondagem (Polling Rate)**: Seleção instantânea entre **125 Hz**, **500 Hz** e **1000 Hz**.
+- ⏱️ **Debounce Time / Keypress Response**: Ajuste fino de **0 a 20 ms** (padrão 8 ms) para cliques sem duplo acionamento indevido ou latência ultrabaixa.
+- 🖲️ **Remapeamento dos 7 Botões**:
+  - Suporte completo a atalhos do Mac (`Cmd`, `Opt`, `Ctrl`, `Shift`), teclas de função `F13..F24`, multimídia, Turbo/Fire Key e desativação.
+  - **Proteção de Segurança**: Validação de hardware que impede desabilitar ou remover o último clique esquerdo, evitando bloqueios acidentais.
+- 🔋 **Monitoramento Preciso de Bateria**:
+  - Leitura contínua da porcentagem real sem fio (`0..100%`) ou indicação de carga com fio.
+  - Notificações nativas do sistema em 20% e 10% de carga restante.
+- 💾 **Múltiplos Perfis com Troca Automática**:
+  - Crie perfis para Jogos, Produtividade, Navegação ou Design.
+  - Troca automática de perfil ao focar na janela do jogo ou aplicativo configurado.
+
+---
+
+## 💻 Utilitário CLI (`n3ctl`)
+
+Para quem prefere linha de comando, scripts de automação ou servidores sem interface gráfica, o projeto inclui o utilitário standalone `n3ctl`:
 
 ```bash
-# 1. Detectar o mouse ou dongle 2.4GHz conectado
-node ./bin/n3ctl.js devices
-
-# 2. Ler versão de firmware, bateria, estágio de DPI ativo e polling rate
+# Diagnóstico e leitura do mouse (bateria, DPI, firmware)
 node ./bin/n3ctl.js status
 
-# 3. Configurar 4 estágios de DPI e ativar o estágio 2 (800 DPI)
+# Configurar 4 estágios de DPI (400, 800, 1600, 3200) e ativar o estágio 2
 node ./bin/n3ctl.js dpi --stages 400,800,1600,3200 --active 2
 
-# 4. Alterar apenas o estágio 1 para 600 DPI preservando os demais
-node ./bin/n3ctl.js dpi --stage 1 --value 600 --active 1
-
-# 5. Ajustar Polling Rate para 1000 Hz
+# Alterar Polling Rate para 1000 Hz
 node ./bin/n3ctl.js rate 1000
 
-# 6. Ajustar Debounce Time para 4 ms
+# Ajustar tempo de debounce para 4ms
 node ./bin/n3ctl.js debounce 4
 
-# 7. Configurar LOD baixo (~1mm) e Motion Sync ligado (sem Angle Snap/Ripple)
-node ./bin/n3ctl.js sensor --lod low --motion-sync on --angle-snap off --ripple off
+# Ajustar sensor (LOD baixo, Motion Sync ligado)
+node ./bin/n3ctl.js sensor --lod low --motion-sync on
 
-# 8. Inspecionar pacotes em modo simulação (--dry-run) sem precisar do mouse plugado
-node ./bin/n3ctl.js dpi --stages 400,800,1600,3200,4800 --active 2 --dry-run
-
-# 9. Monitorar botões de DPI, bateria e repouso em tempo real
-node ./bin/n3ctl.js monitor
-
-# 10. Remapear Botão 4 (Avançar) para Cmd+C e Botão 5 (Voltar) para Play/Pause
+# Remapear Botão 4 para Cmd+C
 node ./bin/n3ctl.js button 4 --combo cmd+c
-node ./bin/n3ctl.js button 5 --media play-pause
 
-# 11. Gravar macro onboard (Cmd+C -> 40ms -> Cmd+V) no Botão 4
-node ./bin/n3ctl.js macro --button 4 --seq "cmd+c,delay:40,cmd+v" --loop count --repeat 1
+# Monitorar eventos de botões e status em tempo real
+node ./bin/n3ctl.js monitor
 ```
 
-> Consulte o manual completo da CLI em [`doc/cli-n3ctl.md`](./doc/cli-n3ctl.md) e o plano do app desktop macOS em [`doc/plano-implementacao-macos-electron.md`](./doc/plano-implementacao-macos-electron.md).
+> Veja todos os comandos e parâmetros no [Manual Completo da CLI (`doc/cli-n3ctl.md`)](./doc/cli-n3ctl.md).
 
 ---
 
-## Resumo do Protocolo USB HID (Report ID `0x51` — 21 Bytes)
+## 🔬 Engenharia Reversa com REA e Ghidra
 
-Todos os comandos de configuração utilizam **HID Feature Reports** de **21 bytes** (`0x15`), preenchidos com `0x00` e **sem checksum/CRC**:
-
-| Comando | Opcode (`buf[1]`) | Payload Principal (`buf[2..20]`) |
-| :--- | :---: | :--- |
-| **Versão de Firmware** | `0x04` | `SetFeature` + `GetFeature` → `buf[3..11]` contém 9 bytes ASCII |
-| **Status de Bateria** | `0x06` | `SetFeature` + `GetFeature` → Sem fio: `buf[11]` (`0..100%`); Cabo: `buf[12]` (`0..7`) |
-| **Estado Ativo & DPI** | `0x07` | `GetFeature` → Cabo `buf[3]` / Sem fio `buf[4]` (`hiNibble`=rate, `loNibble`=stage); `buf[6..15]` = 5×`uint16_le` DPI |
-| **Factory Reset** | `0x0B` | `buf[2] = 0xAA` |
-| **Ping Sem Fio 2.4G** | `0x0C` | `buf[2] = 0x02` (responde via Input Report `0x54, 0xE3`) |
-| **Modo RGB** | `0x22` | `buf[2] = 0x01`, `buf[3] = mode (0..6)` |
-| **Brilho RGB** | `0x23` | `buf[2] = 0x01`, `buf[3] = mode`, `buf[4] = brightness (1..255)` |
-| **Cor RGB (R / G / B)** | `0x24` / `0x25` / `0x26` | `buf[2] = 0x01`, `buf[3] = mode`, `buf[4] = canal (0..255)` |
-| **Velocidade RGB** | `0x27` | `buf[2] = 0x01`, `buf[3] = mode`, `buf[4] = speed (1..255)` |
-| **Estágios de DPI** | `0x40` | `buf[2..4] = activeIdx (0..4)`, `buf[5..14] = 5 × uint16_le DPI`, `buf[15] = count (1..5)` |
-| **Polling Rate** | `0x41` | Cabo: `buf[2] = code`; Sem fio: `buf[3] = code` (`0`=125Hz, `1`=500Hz, `2`=1000Hz) |
-| **LOD & Sensor PAW3395** | `0x42` | `buf[2] = lod (1..2)`, `buf[3] = ripple`, `buf[4] = angleSnap`, `buf[5] = motionSync` (`1`=ON, `2`=OFF) |
-| **Debounce Time** | `0x43` | `buf[2] = ms (0..20)` |
+O driver original do Darmoshark N3 para Windows foi descompilado e analisado através de:
+- **REA (Reverse Engineer Anything)**: Rastreamento estático de call sites USB HID, extração das tabelas de pacotes, identificação dos Usage Pages e decodificação dos relatórios assíncronos de entrada (`Input Reports`).
+- **NSA Ghidra**: Descompilação das rotinas principais do binário `Darmoshark N3 Mouse1.0.7.2.exe` (base `Keychron_driver.pdb`), revelando rotinas críticas como:
+  - `FUN_004418f0`: Descoberta e priorização de endpoints USB com fio (`0xFF10`) vs 2.4G (`0xFF11`).
+  - `FUN_00442a40`: Estrutura de empacotamento dos 5 estágios de DPI em little-endian.
+  - `FUN_00443f40`: Diferenciação do offset do byte de Polling Rate (Cabo no `buf[2]` vs Dongle no `buf[3]`).
+  - `0x4b7de4`: Tabela de hardware dos 7 botões, revelando a inversão física interna entre o Botão 2 (Direito = `0x02`) e Botão 3 (Meio = `0x01`).
+  - `FUN_00443fc0`: Algoritmo de paginação de macros em blocos de até 13 eventos por pacote HID de 65 bytes.
 
 ---
 
-## Resumo do Protocolo USB HID — Botões e Macros (Report ID `0x52` — 65 Bytes)
+## 📑 Documentação Técnica
 
-Os comandos de remapeamento de botões e gravação de macros utilizam **HID Feature Reports** de **65 bytes** (`0x41`). Os 7 botões físicos mapeiam para `hwId = [0x00, 0x02, 0x01, 0x03, 0x04, 0x05, 0x06]` (os botões `2: Direito` e `3: Meio` possuem IDs invertidos no firmware):
-
-| Comando | Cabeçalho (`buf[0..3]`) | Payload (`buf[4..64]`) |
-| :--- | :---: | :--- |
-| **Desativar Botão** | `52 52 hwId 00` | `buf[4] = 0x00` |
-| **Botão → Mouse** | `52 52 hwId 00` | `buf[4] = 0x01`, `buf[5..7]` = máscara de clique/scroll (`01/02/04/08/10/80` ou `02/FE`) |
-| **Botão → Tecla / Atalho** | `52 52 hwId 00` | `buf[4] = 0x02`, `buf[5] = modMask` (`Ctrl=1, Shift=2, Opt=4, Cmd=8`), `buf[6..7] = hidKey1, hidKey2` |
-| **Botão → Multimídia** | `52 52 hwId 00` | `buf[4] = 0x03`, `buf[5..6] = consumerUsage_le` (ex.: `CD 00` Play/Pause, `E9 00` Vol+) |
-| **Botão → Sensibilidade** | `52 52 hwId 00` | `buf[4] = 0x05`, `buf[5] = 0x01` (Loop), `0x02` (DPI+), `0x03` (DPI-) |
-| **Botão → Iluminação** | `52 52 hwId 00` | `buf[4] = 0x06`, `buf[5] = 0x01..0x04` (efeito, velocidade, cor, brilho) |
-| **Botão → Turbo / Fire** | `52 52 hwId 00` | `buf[4] = 0x07`, `buf[5] = 0x01`, `buf[6] = btnMask`, `buf[7..8] = ms_le`, `buf[9..10] = count_le` |
-| **Botão → Sistema** | `52 52 hwId 00` | `buf[4] = 0x08`, `buf[5..7]` = atalho Consumer (`0x0C`) ou Keyboard (`0x07`) |
-| **Reset Só dos Botões** | `51 0B 01 01` | Quadro de 65 bytes preenchido com zeros a partir de `buf[4]` |
-| **Upload de Macro** | `52 55 hwId more` | Paginado em até 13 eventos de 4B/pacote (`0x81/0x01` tecla, `0x88/0x08` mouse, `0x0F` delay, `0x09` move) |
+- 📖 [Protocolo USB HID Detalhado (doc/protocolo-usb-hid.md)](./doc/protocolo-usb-hid.md): Especificação completa dos Feature Reports de 21 bytes (`0x51`), 65 bytes (`0x52`) e Input Reports (`0x54`).
+- ⌨️ [Manual de Linha de Comando (doc/cli-n3ctl.md)](./doc/cli-n3ctl.md): Guia de referência rápida para terminal e scripts.
+- 📐 [Plano de Arquitetura macOS / Electron (doc/plano-implementacao-macos-electron.md)](./doc/plano-implementacao-macos-electron.md): Documento de design do ecossistema de processos, IPC e popover.
 
 ---
 
-## Testes Automatizados
+## 🧪 Testes Automatizados
+
+Uma suite completa com 18 testes automatizados garante a conformidade com o protocolo original:
 
 ```bash
 npm test
 ```
+
+```text
+✔ Constantes de identificação USB HID correspondem a FUN_004418f0 (0x4418f0)
+✔ Prioridade de descoberta HID prefere cabo USB sobre receptor 2.4G
+✔ encodeDpiPacket (0x51, 0x40) codifica exatamente como FUN_00442a40
+✔ encodePollingRatePacket (0x51, 0x41) respeita deslocamento cabo vs wireless
+✔ encodeDebouncePacket (0x51, 0x43) valida faixa 0..20ms
+✔ encodeSensorPacket (0x51, 0x42) mapeia LOD e flags PAW3395
+✔ Tabela de IDs de hardware dos 7 botões respeita inversão Botão 2 vs Botão 3
+✔ encodeButtonMappingPacket (0x52, 0x52) codifica todas as 8 categorias
+✔ encodeMacroPackets (0x52, 0x55) pagina blocos de 13 eventos
+✔ N3Device protege contra remoção acidental do último Clique Esquerdo
+✔ N3AppStore gerencia perfis, biblioteca de macros e automações macOS
+ℹ 18 passing (100%)
+```
+
+---
+
+## ⚖️ Licença e Isenção de Responsabilidade
+
+Este projeto possui código aberto sob a licença [MIT](./package.json).
+
+*Darmoshark* é uma marca registrada de seus respectivos proprietários. Este projeto é uma iniciativa independente da comunidade, sem afiliação direta ou endosso comercial da Motospeed / Darmoshark. Os recursos visuais e informações técnicas são utilizados sob fins de interoperabilidade de hardware e compatibilidade em sistemas operacionais não atendidos pelo fornecedor original.

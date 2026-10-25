@@ -24,7 +24,11 @@ export function MainWindow({ fullState, api }) {
   const lang = store.language || 'pt';
   const t = I18N[lang] || I18N.pt;
 
-  const [tab, setTab] = useState('ptr'); // 'key' | 'ptr' | 'mac' | 'sys' | 'osx'
+  const initialTab =
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('tab')) ||
+    'ptr';
+  const [tab, setTab] = useState(initialTab); // 'key' | 'ptr' | 'mac' | 'sys' | 'osx'
   const [selectedBtn, setSelectedBtn] = useState(1);
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
