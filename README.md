@@ -78,61 +78,61 @@ O visual reproduz com fidelidade 1:1 os assets oficiais de alta definição da D
 
 ## 🚀 Como Baixar e Instalar
 
+Você pode baixar os executáveis prontos para o seu sistema diretamente na aba de [**Releases Oficiais no GitHub**](https://github.com/ihuri/N3-Control-Center/releases/latest).
+
+---
+
 ### 🍏 macOS (Apple Silicon M1/M2/M3/M4 & Intel)
 
-#### Opção A: Executar via Código-Fonte (Recomendada para Desenvolvedores)
-```bash
-# 1. Clone o repositório
-git clone https://github.com/ihuribarboza/n3-control-center.git
-cd n3-control-center
+1. Baixe o arquivo `.dmg` na [página de Releases](https://github.com/ihuri/N3-Control-Center/releases/latest).
+2. Abra o `.dmg` e arraste o **N3 Control Center.app** para a pasta `/Applications`.
 
-# 2. Instale as dependências (Node.js >= 20 necessário)
-npm install
-
-# 3. Inicie o aplicativo desktop
-npm start
-```
-
-#### Opção B: Gerar Instalador Nativo `.dmg` ou `.app`
-```bash
-# Gerar pacote .app descompactado em release/mac-arm64/
-npm run pack:mac
-
-# Gerar arquivo instalador .dmg para distribuir
-npm run dist:mac
-```
-Após gerar, abra a pasta `release/` e arraste o **N3 Control Center.app** para a pasta `/Applications`.
+> 🛡️ **Se aparecer a mensagem: "O aplicativo está danificado e não pode ser aberto"**:
+> Esta é uma proteção padrão do macOS Gatekeeper para aplicativos open-source baixados pelo navegador que não possuem a assinatura anual paga da Apple. Para liberar o app para sempre em 1 segundo, abra o Terminal e execute:
+> ```bash
+> xattr -cr "/Applications/N3 Control Center.app"
+> ```
+> *(Se o arquivo ainda estiver na pasta Downloads: `xattr -cr ~/Downloads/"N3 Control Center.app"`).*
 
 > ⚠️ **Permissão de Hardware no macOS**:
-> Caso o sistema bloqueie o acesso direto ao dispositivo HID, vá em:
-> **Ajustes do Sistema → Privacidade e Segurança → Monitoramento de Entrada (Input Monitoring)** e certifique-se de que o **N3 Control Center** (ou o seu Terminal) esteja autorizado.
+> Caso o sistema solicite acesso direto ao dispositivo HID, vá em:
+> **Ajustes do Sistema → Privacidade e Segurança → Monitoramento de Entrada (Input Monitoring)** e certifique-se de que o **N3 Control Center** esteja autorizado.
+
+#### Executar via Código-Fonte (Desenvolvedores):
+```bash
+git clone https://github.com/ihuri/N3-Control-Center.git
+cd N3-Control-Center
+npm install
+npm start
+```
 
 ---
 
 ### 🐧 Linux (Ubuntu, Debian, Fedora, Arch)
 
-1. Certifique-se de que sua conta possui acesso aos dispositivos USB HID brutos adicionando uma regra `udev`:
+1. Baixe o arquivo `.AppImage` ou o pacote `.deb` na [página de Releases](https://github.com/ihuri/N3-Control-Center/releases/latest).
+2. **Permissão de Acesso USB (udev)**: Adicione a regra para sua conta acessar o chip Telink / mouse (`VID 0x248A`) sem precisar de `sudo`:
 ```bash
-# Criar regra udev para o Telink MCU / Darmoshark N3 (VID 0x248A)
 echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="248a", MODE="0666"' | sudo tee /etc/udev/rules.d/99-darmoshark-n3.rules
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
-2. Inicie o aplicativo:
+3. **Executando o AppImage**:
 ```bash
-npm install
-npm start
+chmod +x N3-Control-Center*.AppImage
+./N3-Control-Center*.AppImage
 ```
+*(Ou instale o `.deb` com: `sudo dpkg -i n3-control-center*.deb`).*
 
 ---
 
-### 🪟 Windows
+### 🪟 Windows (10 / 11)
 
-1. Clone o repositório e execute:
-```bash
-npm install
-npm start
-```
-*(Funciona perfeitamente lado a lado ou como substituto leve ao driver OEM).*
+1. Baixe o instalador `N3-Control-Center-Setup.exe` ou a versão portátil `N3-Control-Center-portable.exe` na [página de Releases](https://github.com/ihuri/N3-Control-Center/releases/latest).
+2. Execute o arquivo baixado.
+
+> 🛡️ **Aviso do Windows SmartScreen**:
+> Ao abrir pela primeira vez, o Windows Defender pode exibir a tela azul *"O Windows protegeu o seu computador"*. 
+> Basta clicar no link **"Mais informações"** (*More info*) e depois clicar no botão **"Executar assim mesmo"** (*Run anyway*).
 
 ---
 
