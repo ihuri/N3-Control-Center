@@ -3,3 +3,6 @@ dist/
 release/
 .DS_Store
 *.log
+
+# Electron single instance locks
+Singleton*
