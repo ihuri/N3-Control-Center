@@ -1,0 +1,36 @@
+{
+  "name": "n3-control-center",
+  "version": "1.0.0",
+  "description": "Utilitário de configuração para macOS do mouse Darmoshark N3 via USB HID (engenharia reversa do driver oficial v1.0.7.2)",
+  "type": "module",
+  "bin": {
+    "n3ctl": "./bin/n3ctl.js"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./protocol": "./src/protocol.js",
+    "./device": "./src/device.js",
+    "./state": "./src/state.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node ./bin/n3ctl.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "darmoshark",
+    "darmoshark-n3",
+    "paw3395",
+    "usb-hid",
+    "node-hid",
+    "macos",
+    "mouse"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-hid": "^3.1.2"
+  }
+}
