@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  BUTTON_HW_IDS,
   DEVICE_TARGETS,
   VENDOR_ID,
   batteryPercentToIconLevel,
@@ -12,6 +13,9 @@ import {
   decodeBatteryResponse,
   decodeFirmwareResponse,
   decodeInputReport,
+  encodeButtonDisablePacket,
+  encodeButtonMappingPacket,
+  encodeButtonResetPacket,
   encodeDebouncePacket,
   encodeDpiPacket,
   encodeFactoryResetPacket,
@@ -19,15 +23,19 @@ import {
   encodeLightColorPackets,
   encodeLightModePacket,
   encodeLightSpeedPacket,
+  encodeMacroPackets,
   encodePollingRatePacket,
   encodeRgbSequence,
   encodeSensorPacket,
   encodeWirelessPingPacket,
   formatHexPacket,
   normalizeFeatureReply,
+  parseKeyCombo,
+  resolveButtonHardwareId,
 } from '../src/protocol.js';
-import { matchN3HidEntries } from '../src/device.js';
+import { DryRunTransport, N3Device, matchN3HidEntries } from '../src/device.js';
 import { runCli } from '../src/cli.js';
+import { N3AppStore } from '../src/app-store.js';
 
 test('Constantes de identificação USB HID correspondem a FUN_004418f0 (0x4418f0)', () => {
   assert.equal(VENDOR_ID, 0x248a);
@@ -286,5 +294,264 @@ test('CLI executa fluxo --dry-run completo em JSON para DPI, Polling Rate, Debou
     assert.equal(out2.packetHex, '51 41 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00');
   } finally {
     fs.rmSync(tmpState, { force: true });
+  }
+});
+
+test('Tabela de IDs de hardware dos 7 botões (0x4b7de4) respeita inversão Botão 2 (0x02) vs Botão 3 (0x01)', () => {
+  assert.deepEqual(BUTTON_HW_IDS, [0x00, 0x02, 0x01, 0x03, 0x04, 0x05, 0x06]);
+  assert.equal(resolveButtonHardwareId(1), 0x00);
+  assert.equal(resolveButtonHardwareId('right'), 0x02);
+  assert.equal(resolveButtonHardwareId(2), 0x02);
+  assert.equal(resolveButtonHardwareId('middle'), 0x01);
+  assert.equal(resolveButtonHardwareId(3), 0x01);
+  assert.equal(resolveButtonHardwareId('forward'), 0x03);
+  assert.equal(resolveButtonHardwareId('back'), 0x04);
+  assert.equal(resolveButtonHardwareId('dpi+'), 0x05);
+  assert.equal(resolveButtonHardwareId('dpi-'), 0x06);
+});
+
+test('encodeButtonResetPacket (0x447f3c) e encodeButtonDisablePacket (0x446b1c) geram quadros de 65 bytes', () => {
+  const resetPkt = encodeButtonResetPacket();
+  assert.equal(resetPkt.length, 65);
+  assert.equal(formatHexPacket(resetPkt.subarray(0, 8)), '51 0B 01 01 00 00 00 00');
+  assert.ok(resetPkt.subarray(4).every((b) => b === 0x00));
+
+  const disableBtn2 = encodeButtonDisablePacket(2);
+  assert.equal(disableBtn2.length, 65);
+  assert.equal(formatHexPacket(disableBtn2.subarray(0, 8)), '52 52 02 00 00 00 00 00');
+});
+
+test('encodeButtonMappingPacket (0x52, 0x52) codifica todas as 8 categorias conforme FUN_00442e40 (0x442e40)', () => {
+  // 1. Mouse: scroll-down (00 FE 00) no Botão 4 (hwId 0x03)
+  const mousePkt = encodeButtonMappingPacket(4, { category: 'mouse', action: 'scroll-down' });
+  assert.equal(mousePkt.length, 65);
+  assert.equal(formatHexPacket(mousePkt.subarray(0, 10)), '52 52 03 00 01 00 FE 00 00 00');
+
+  // 2. Combo macOS: Cmd+Shift+4 (Cmd=0x08 | Shift=0x02 = 0x0A, '4'=0x21) no Botão 5 (hwId 0x04)
+  const comboPkt = encodeButtonMappingPacket(5, { category: 'combo', combo: 'cmd+shift+4' });
+  assert.equal(formatHexPacket(comboPkt.subarray(0, 10)), '52 52 04 00 02 0A 21 00 00 00');
+
+  // Combo com '+' literal (cmd++) e 2 teclas comuns (ctrl+a+b)
+  assert.deepEqual(parseKeyCombo('cmd++'), { modifierMask: 0x08, keyCodes: [0x2e, 0x00] });
+  assert.deepEqual(parseKeyCombo('ctrl+a+b'), { modifierMask: 0x01, keyCodes: [0x04, 0x05] });
+  assert.throws(() => parseKeyCombo('ctrl+a+b+c'), RangeError);
+
+  // 3. Multimídia: Media Player (0x0183 LE -> 83 01) no Botão 6 (hwId 0x05)
+  const mediaPkt = encodeButtonMappingPacket(6, { category: 'media', action: 'player' });
+  assert.equal(formatHexPacket(mediaPkt.subarray(0, 10)), '52 52 05 00 03 83 01 00 00 00');
+
+  // 4. Sensibilidade / DPI: loop (0x01) no Botão 7 (hwId 0x06)
+  const dpiPkt = encodeButtonMappingPacket(7, { category: 'dpi', action: 'loop' });
+  assert.equal(formatHexPacket(dpiPkt.subarray(0, 10)), '52 52 06 00 05 01 00 00 00 00');
+
+  // 5. Iluminação: brightness-switch (0x04) no Botão 6 (hwId 0x05)
+  const lightPkt = encodeButtonMappingPacket(6, { category: 'light', action: 'brightness-switch' });
+  assert.equal(formatHexPacket(lightPkt.subarray(0, 10)), '52 52 05 00 06 04 00 00 00 00');
+
+  // 6. Turbo / Fire Key: botão esquerdo (0x01), 300ms (0x012C -> 2C 01), 500 ciclos (0x01F4 -> F4 01)
+  const turboPkt = encodeButtonMappingPacket(4, {
+    category: 'turbo',
+    button: 'left',
+    intervalMs: 300,
+    repeatCount: 500,
+  });
+  assert.equal(formatHexPacket(turboPkt.subarray(0, 12)), '52 52 03 00 07 01 01 2C 01 F4 01 00');
+
+  // 7. Atalho de Sistema: brightness-up (0C 6F 00) no Botão 3 (Meio -> hwId 0x01)
+  const sysPkt = encodeButtonMappingPacket(3, { category: 'system', action: 'brightness-up' });
+  assert.equal(formatHexPacket(sysPkt.subarray(0, 10)), '52 52 01 00 08 0C 6F 00 00 00');
+});
+
+test('encodeMacroPackets (0x52, 0x55) pagina blocos de 13 eventos e codifica modos/offsets conforme FUN_00443fc0', () => {
+  // Bloco único com 4 eventos (key-down, delay 300ms, move -10/+25, key-up) em modo hold (0x2001 -> 01 20)
+  const singleChunks = encodeMacroPackets({
+    button: 4, // hwId 0x03
+    loopMode: 'hold',
+    events: [
+      { type: 'key-down', key: 'a' },
+      { type: 'delay', ms: 300 }, // 0x012C -> 2C 01
+      { type: 'move', dx: -10, dy: 25 }, // -10=0xF6, 25=0x19
+      { type: 'key-up', key: 'a' },
+    ],
+  });
+
+  assert.equal(singleChunks.length, 1);
+  const c0 = singleChunks[0];
+  assert.equal(c0.length, 65);
+  // Header chunk 0: 52 55 03(hwId) 00(last) 00 00(offset) 16(6+4*4=22=0x16) 01 01 20(0x2001) 00 00 04(total)
+  assert.equal(
+    formatHexPacket(c0.subarray(0, 13)),
+    '52 55 03 00 00 00 16 01 01 20 00 00 04',
+  );
+  // 4 eventos de 4 bytes em buf[13..28]
+  assert.equal(
+    formatHexPacket(c0.subarray(13, 29)),
+    '00 81 04 00 00 0F 2C 01 00 09 F6 19 00 01 04 00',
+  );
+
+  // Macro multi-bloco com 28 eventos -> 3 blocos (13 + 13 + 2 eventos) em modo toggle (0x4001 -> 01 40)
+  const twentyEightEvents = [];
+  for (let i = 0; i < 14; i += 1) {
+    twentyEightEvents.push({ type: 'mouse-down', button: 'left' });
+    twentyEightEvents.push({ type: 'mouse-up', button: 'left' });
+  }
+  const multi = encodeMacroPackets({
+    button: 5, // hwId 0x04
+    loopMode: 'toggle',
+    events: twentyEightEvents,
+  });
+
+  assert.equal(multi.length, 3);
+  // Bloco 0: hasMore=01, offset=00 00, len=0x3A (58), loop=01 40, total=0x1C (28)
+  assert.equal(
+    formatHexPacket(multi[0].subarray(0, 13)),
+    '52 55 04 01 00 00 3A 01 01 40 00 00 1C',
+  );
+  // Bloco 1 (k=1): hasMore=01, offset=1*0x34+6 = 0x003A -> 3A 00, len=13*4 = 0x34
+  assert.equal(formatHexPacket(multi[1].subarray(0, 7)), '52 55 04 01 3A 00 34');
+  // Bloco 2 (k=2): hasMore=00, offset=2*0x34+6 = 0x006E -> 6E 00, len=2*4 = 0x08
+  assert.equal(formatHexPacket(multi[2].subarray(0, 7)), '52 55 04 00 6E 00 08');
+  assert.equal(formatHexPacket(multi[2].subarray(7, 15)), '00 88 01 00 00 08 01 00');
+});
+
+test('N3Device protege contra remoção acidental do último Clique Esquerdo (modo canhoto seguro)', async () => {
+  const dev = new N3Device(new DryRunTransport('wired'), { interPacketDelayMs: 0 });
+
+  await assert.rejects(
+    () => dev.setButtonMapping(1, { category: 'mouse', action: 'right-click' }),
+    (err) => err.code === 'LEFT_CLICK_REQUIRED',
+  );
+
+  // Ao mapear o Botão 2 para left-click (modo canhoto), passa a permitir remapear o Botão 1 para right-click
+  const customButtons = {
+    1: { category: 'mouse', action: 'left-click' },
+    2: { category: 'mouse', action: 'left-click' },
+  };
+  const pkt = await dev.setButtonMapping(
+    1,
+    { category: 'mouse', action: 'right-click' },
+    { currentButtons: customButtons },
+  );
+  assert.equal(formatHexPacket(pkt.subarray(0, 8)), '52 52 00 00 01 02 00 00');
+});
+
+test('CLI executa subcomandos button e macro em --dry-run --json', async () => {
+  const tmpState = path.join(os.tmpdir(), `n3ctl-btn-macro-${Date.now()}.json`);
+  const logs = [];
+  const io = {
+    stdout: (msg) => logs.push(msg),
+    stderr: (msg) => logs.push(msg),
+  };
+
+  try {
+    const codeBtn = await runCli(
+      ['button', '4', '--combo', 'cmd+c', '--dry-run', '--json', '--state-file', tmpState],
+      io,
+    );
+    assert.equal(codeBtn, 0);
+    const outBtn = JSON.parse(logs.pop());
+    assert.equal(outBtn.button, 4);
+    assert.equal(outBtn.hwId, 0x03);
+    assert.ok(outBtn.packetHex.startsWith('52 52 03 00 02 08 06 00'));
+
+    const codeResetBtn = await runCli(
+      ['button', 'reset', '--dry-run', '--json', '--state-file', tmpState],
+      io,
+    );
+    assert.equal(codeResetBtn, 0);
+    const outResetBtn = JSON.parse(logs.pop());
+    assert.ok(outResetBtn.packetHex.startsWith('51 0B 01 01 00'));
+
+    const codeMacro = await runCli(
+      [
+        'macro',
+        '--button',
+        '5',
+        '--seq',
+        'cmd+c,delay:40,cmd+v',
+        '--loop',
+        'count',
+        '--repeat',
+        '2',
+        '--dry-run',
+        '--json',
+        '--state-file',
+        tmpState,
+      ],
+      io,
+    );
+    assert.equal(codeMacro, 0);
+    const outMacro = JSON.parse(logs.pop());
+    assert.equal(outMacro.button, 5);
+    assert.equal(outMacro.hwId, 0x04);
+    assert.equal(outMacro.chunkCount, 1);
+    assert.ok(outMacro.packetsHex[0].startsWith('52 55 04 00 00 00'));
+  } finally {
+    fs.rmSync(tmpState, { force: true });
+  }
+});
+
+test('N3AppStore gerencia múltiplos perfis, biblioteca de macros, automações macOS e sincroniza state.json com a CLI', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'n3-appstore-'));
+  const storePath = path.join(tmpDir, 'app-config.json');
+  const cliStatePath = path.join(tmpDir, 'state.json');
+
+  try {
+    const store = new N3AppStore({ storePath, cliStatePath });
+    assert.equal(store.getSnapshot().activeProfileId, 'standard');
+    assert.equal(store.getSnapshot().profiles.length, 5);
+    assert.equal(store.getSnapshot().menubar.showBatteryPercent, true);
+    assert.equal(store.getSnapshot().menubar.showDpi, true);
+
+    // Atualiza DPI e Polling Rate no perfil ativo e verifica sincronia com state.json
+    store.updateActiveProfile({
+      dpiStages: [400, 1200, 1600, 3200, 6400],
+      activeDpiStage: 2,
+      pollingRateHz: 1000,
+    });
+    const syncedCli = JSON.parse(fs.readFileSync(cliStatePath, 'utf8'));
+    assert.equal(syncedCli.dpiStages[1], 1200);
+    assert.equal(syncedCli.pollingRateHz, 1000);
+
+    // Criação, renomeação e exclusão de perfis
+    store.createProfile('Valorant Mac');
+    const created = store.getActiveProfile();
+    assert.equal(created.name, 'Valorant Mac');
+    assert.equal(created.pollingRateHz, 1000);
+
+    store.renameProfile(created.id, 'CS2 Pro');
+    assert.equal(store.getActiveProfile().name, 'CS2 Pro');
+
+    // Upsert de macro e preferências da Menu Bar Híbrida / Automações
+    const { macro } = store.upsertMacro({
+      name: 'BunnyHop',
+      delayMode: 'uniform',
+      uniformDelayMs: 15,
+      loopMode: 'hold',
+      events: [
+        { type: 'key-down', key: 'space' },
+        { type: 'delay', ms: 15 },
+        { type: 'key-up', key: 'space' },
+      ],
+    });
+    assert.equal(macro.name, 'BunnyHop');
+    assert.ok(store.getSnapshot().macros.some((m) => m.id === macro.id));
+
+    store.updatePreferences({
+      language: 'en',
+      menubar: { showBatteryPercent: false, showDpi: true },
+      automations: { autoEco: { batteryThreshold: 20 } },
+    });
+    assert.equal(store.getSnapshot().language, 'en');
+    assert.equal(store.getSnapshot().menubar.showBatteryPercent, false);
+    assert.equal(store.getSnapshot().automations.autoEco.batteryThreshold, 20);
+
+    store.deleteMacro(macro.id);
+    assert.ok(!store.getSnapshot().macros.some((m) => m.id === macro.id));
+
+    store.deleteProfile(created.id);
+    assert.ok(!store.getSnapshot().profiles.some((p) => p.id === created.id));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

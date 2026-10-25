@@ -5,6 +5,24 @@
  * - Executável interno: darmoshark.exe (PE32 x86 C++ Win32, Keychron_driver.pdb)
  */
 
+import {
+  BUTTON_ACTION_CATEGORY,
+  DEFAULT_BUTTON_MAPPINGS,
+  MACRO_LIMITS,
+  MACRO_LOOP_MODES,
+  normalizeMacroEvents,
+  parseKeyCombo,
+  resolveButtonHardwareId,
+  resolveDpiButtonAction,
+  resolveLightButtonAction,
+  resolveMediaAction,
+  resolveMouseAction,
+  resolveSystemShortcut,
+  resolveTurboMouseButton,
+} from './keymap.js';
+
+export * from './keymap.js';
+
 export const VENDOR_ID = 0x248a; // Telink Semiconductor (9354)
 
 export const DEVICE_TARGETS = Object.freeze({
@@ -61,6 +79,11 @@ export const OPCODE = Object.freeze({
 export const INPUT_OPCODE = Object.freeze({
   STATUS_NOTIFICATION: 0xe2, // Bateria, estágio DPI, polling rate e sleep/wake
   WIRELESS_HANDSHAKE: 0xe3, // Resposta ao ping 0x51 0x0C 0x02
+});
+
+export const KEYMAP_OPCODE = Object.freeze({
+  SET_BUTTON: 0x52, // FUN_00442e40 (0x442e40) e Disable em 0x446b1c
+  UPLOAD_MACRO: 0x55, // FUN_00443fc0 (0x443fc0)
 });
 
 export const POLLING_RATE_TO_CODE = Object.freeze({
@@ -149,7 +172,21 @@ export const DEFAULT_PROFILE = Object.freeze({
     brightness: 10, // LightLevel = 10
     speed: 1, // SpeedLevel = 1
   }),
+  buttons: DEFAULT_BUTTON_MAPPINGS,
 });
+
+/**
+ * Cria um buffer de 65 bytes (0x41) preenchido com zeros para o Report ID 0x52 (botões/macros).
+ */
+export function createKeymapPacket(opcode) {
+  if (!Number.isInteger(opcode) || opcode < 0 || opcode > 0xff) {
+    throw new RangeError(`Opcode 0x52 inválido: ${opcode}`);
+  }
+  const packet = new Uint8Array(REPORT_LENGTH.FEATURE_KEYMAP);
+  packet[0] = REPORT_ID.FEATURE_KEYMAP;
+  packet[1] = opcode;
+  return packet;
+}
 
 /**
  * Cria um buffer de 21 bytes preenchido com zeros para o Report ID 0x51.
@@ -716,4 +753,261 @@ export function decodeInputReport(rawBytes, mode = 'wireless') {
     opcode: subOpcode,
     rawPacket: buf,
   };
+}
+
+/**
+ * [0x51, 0x0B, 0x01, 0x01, 0x00...] (65 bytes / 0x41) — Restaura exclusivamente os 7 botões físicos
+ * aos valores de fábrica no MCU sem alterar estágios de DPI ou sensor.
+ * Referência: 0x447f3c em FUN_00447d60.
+ */
+export function encodeButtonResetPacket() {
+  const packet = new Uint8Array(REPORT_LENGTH.FEATURE_KEYMAP);
+  packet[0] = REPORT_ID.FEATURE_CONFIG;
+  packet[1] = OPCODE.FACTORY_RESET;
+  packet[2] = 0x01;
+  packet[3] = 0x01;
+  return packet;
+}
+
+/**
+ * [0x52, 0x52, hwId, 0x00, 0x00, ...] (65 bytes) — Desativa um botão físico (1..7).
+ * Referência: handler do botão UI "Disable" em 0x446b1c.
+ */
+export function encodeButtonDisablePacket(button) {
+  const hwId = resolveButtonHardwareId(button);
+  const packet = createKeymapPacket(KEYMAP_OPCODE.SET_BUTTON);
+  packet[2] = hwId;
+  packet[3] = 0x00;
+  packet[4] = BUTTON_ACTION_CATEGORY.DISABLED;
+  return packet;
+}
+
+/**
+ * [0x52, 0x52, hwId, 0x00, category, ...] (65 bytes / 0x41) — Codifica o remapeamento de qualquer um
+ * dos 7 botões físicos do Darmoshark N3 conforme FUN_00442e40 (0x442e40).
+ *
+ * Categorias suportadas em `actionConfig.category`:
+ * - 'disable' / 'disabled'
+ * - 'mouse'   ({ action: 'left-click' | 'right-click' | 'middle-click' | 'button-4' | 'button-5' | 'double-click' | 'scroll-up' | 'scroll-down' | 'scroll-left' | 'scroll-right' })
+ * - 'combo'   ({ combo: 'cmd+c' } ou { modifiers: ['cmd'], keys: ['c'] })
+ * - 'media'   ({ action: 'volume-up' | 'volume-down' | 'mute' | 'player' | 'play-pause' | 'prev-track' | 'next-track' | 'stop' })
+ * - 'dpi'     ({ action: 'loop' | 'dpi-up' | 'dpi-down' })
+ * - 'light'   ({ action: 'effect-switch' | 'speed-switch' | 'color-switch' | 'brightness-switch' })
+ * - 'turbo'   ({ button: 'left' | 'right' | 'middle' | 'button-4' | 'button-5', intervalMs: 1..65535, repeatCount: 0..65535 })
+ * - 'system'  ({ action: 'brightness-up' | 'brightness-down' | 'calculator' | 'my-computer' | 'browser-home' | 'mail' | 'refresh' | 'switch-apps' | 'copy' | 'cut' | 'paste' })
+ */
+export function encodeButtonMappingPacket(button, actionConfig = {}) {
+  if (!actionConfig || typeof actionConfig !== 'object') {
+    throw new TypeError('Informe um objeto de configuração válido para o botão.');
+  }
+
+  const hwId = resolveButtonHardwareId(button);
+  const category = String(actionConfig.category ?? actionConfig.type ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (category === 'disable' || category === 'disabled' || category === 'off') {
+    return encodeButtonDisablePacket(button);
+  }
+
+  const packet = createKeymapPacket(KEYMAP_OPCODE.SET_BUTTON);
+  packet[2] = hwId;
+  packet[3] = 0x00;
+
+  if (category === 'mouse') {
+    const { bytes } = resolveMouseAction(actionConfig.action);
+    packet[4] = BUTTON_ACTION_CATEGORY.MOUSE;
+    packet[5] = bytes[0];
+    packet[6] = bytes[1];
+    packet[7] = bytes[2];
+    return packet;
+  }
+
+  if (category === 'combo' || category === 'key' || category === 'keyboard') {
+    const comboSource = actionConfig.combo ?? actionConfig;
+    const { modifierMask, keyCodes } = parseKeyCombo(comboSource);
+    packet[4] = BUTTON_ACTION_CATEGORY.KEYBOARD_COMBO;
+    packet[5] = modifierMask;
+    packet[6] = keyCodes[0];
+    packet[7] = keyCodes[1];
+    return packet;
+  }
+
+  if (category === 'media' || category === 'multimedia') {
+    const { bytes } = resolveMediaAction(actionConfig.action);
+    packet[4] = BUTTON_ACTION_CATEGORY.MEDIA;
+    packet[5] = bytes[0];
+    packet[6] = bytes[1];
+    return packet;
+  }
+
+  if (category === 'dpi' || category === 'sensitivity' || category === 'cpi') {
+    const { code } = resolveDpiButtonAction(actionConfig.action);
+    packet[4] = BUTTON_ACTION_CATEGORY.DPI;
+    packet[5] = code;
+    return packet;
+  }
+
+  if (category === 'light' || category === 'lighting') {
+    const { code } = resolveLightButtonAction(actionConfig.action);
+    packet[4] = BUTTON_ACTION_CATEGORY.LIGHT;
+    packet[5] = code;
+    return packet;
+  }
+
+  if (category === 'turbo' || category === 'fire') {
+    const { mask } = resolveTurboMouseButton(actionConfig.button ?? actionConfig.action ?? 'left');
+    const intervalMs = actionConfig.intervalMs ?? 20;
+    const repeatCount = actionConfig.repeatCount ?? 0;
+
+    if (!Number.isInteger(intervalMs) || intervalMs < 1 || intervalMs > 65535) {
+      throw new RangeError(
+        `Intervalo de Turbo inválido (${intervalMs} ms). Use um inteiro entre 1 e 65535 ms.`,
+      );
+    }
+    if (!Number.isInteger(repeatCount) || repeatCount < 0 || repeatCount > 65535) {
+      throw new RangeError(
+        `Contagem de repetição de Turbo inválida (${repeatCount}). Use 0 (contínuo enquanto segurar) ou 1..65535.`,
+      );
+    }
+
+    packet[4] = BUTTON_ACTION_CATEGORY.TURBO;
+    packet[5] = 0x01;
+    packet[6] = mask;
+    packet[7] = intervalMs & 0xff;
+    packet[8] = (intervalMs >> 8) & 0xff;
+    packet[9] = repeatCount & 0xff;
+    packet[10] = (repeatCount >> 8) & 0xff;
+    return packet;
+  }
+
+  if (category === 'system') {
+    const { bytes } = resolveSystemShortcut(actionConfig.action);
+    packet[4] = BUTTON_ACTION_CATEGORY.SYSTEM;
+    packet[5] = bytes[0];
+    packet[6] = bytes[1];
+    packet[7] = bytes[2];
+    return packet;
+  }
+
+  throw new RangeError(
+    `Categoria de botão inválida ("${actionConfig.category}"). Use: disable, mouse, combo, media, dpi, light, turbo ou system.`,
+  );
+}
+
+/**
+ * [0x52, 0x55, hwId, hasMoreChunks, ...] (sequência paginada de 65 bytes / 0x41)
+ * Codifica e vincula uma macro onboard a um botão físico (1..7) conforme FUN_00443fc0 (0x443fc0).
+ *
+ * - Até 13 eventos de 4 bytes por pacote (máx. 255 eventos totais).
+ * - Chunk 0: offset 0x0000, cabeçalho de 6 bytes (0x01, loopWord_le, 0x0000, totalEventCount) + até 13 eventos.
+ * - Chunk k >= 1: offset (k * 0x34 + 6) em uint16_le, tamanho (eventsInChunk * 4) + até 13 eventos.
+ */
+export function encodeMacroPackets({
+  button,
+  loopMode = 'count',
+  loopCount = 1,
+  events,
+}) {
+  const hwId = resolveButtonHardwareId(button);
+
+  let rawEvents;
+  if (
+    Array.isArray(events) &&
+    events.length > 0 &&
+    Array.isArray(events[0]) &&
+    events[0].length === 4
+  ) {
+    if (events.length > MACRO_LIMITS.MAX_EVENTS_TOTAL) {
+      throw new RangeError(
+        `Quantidade de eventos excede o limite de hardware (${events.length} > ${MACRO_LIMITS.MAX_EVENTS_TOTAL}).`,
+      );
+    }
+    rawEvents = events.map((tuple, idx) => {
+      if (
+        !Array.isArray(tuple) ||
+        tuple.length !== 4 ||
+        !tuple.every((b) => Number.isInteger(b) && b >= 0 && b <= 0xff)
+      ) {
+        throw new TypeError(`Tupla de evento de macro inválida no índice ${idx}.`);
+      }
+      return tuple;
+    });
+  } else {
+    rawEvents = normalizeMacroEvents(events);
+  }
+
+  const normalizedMode = String(loopMode ?? 'count').trim().toLowerCase();
+  let loopWord;
+  if (normalizedMode === 'hold' || normalizedMode === 'until-release') {
+    loopWord = MACRO_LOOP_MODES.hold; // 0x2001 -> [0x01, 0x20]
+  } else if (normalizedMode === 'toggle' || normalizedMode === 'until-any-key') {
+    loopWord = MACRO_LOOP_MODES.toggle; // 0x4001 -> [0x01, 0x40]
+  } else if (normalizedMode === 'count' || normalizedMode === 'repeat') {
+    if (
+      !Number.isInteger(loopCount) ||
+      loopCount < 1 ||
+      loopCount > MACRO_LIMITS.MAX_LOOP_COUNT
+    ) {
+      throw new RangeError(
+        `loopCount inválido (${loopCount}). Informe um inteiro entre 1 e ${MACRO_LIMITS.MAX_LOOP_COUNT}.`,
+      );
+    }
+    loopWord = loopCount;
+  } else {
+    throw new RangeError(
+      `Modo de repetição de macro inválido ("${loopMode}"). Use "hold", "toggle" ou "count".`,
+    );
+  }
+
+  const totalEvents = rawEvents.length;
+  const chunkCount = Math.ceil(totalEvents / MACRO_LIMITS.EVENTS_PER_PACKET);
+  const packets = [];
+
+  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+    const chunkEvents = rawEvents.slice(
+      chunkIndex * MACRO_LIMITS.EVENTS_PER_PACKET,
+      (chunkIndex + 1) * MACRO_LIMITS.EVENTS_PER_PACKET,
+    );
+    const pkt = createKeymapPacket(KEYMAP_OPCODE.UPLOAD_MACRO);
+    pkt[2] = hwId;
+    pkt[3] = chunkIndex < chunkCount - 1 ? 0x01 : 0x00;
+
+    if (chunkIndex === 0) {
+      pkt[4] = 0x00;
+      pkt[5] = 0x00;
+      pkt[6] = 6 + chunkEvents.length * 4; // 0x3A (58) quando 13 eventos
+      pkt[7] = 0x01;
+      pkt[8] = loopWord & 0xff;
+      pkt[9] = (loopWord >> 8) & 0xff;
+      pkt[10] = 0x00;
+      pkt[11] = 0x00;
+      pkt[12] = totalEvents;
+
+      chunkEvents.forEach((ev, idx) => {
+        const base = 13 + idx * 4;
+        pkt[base] = ev[0];
+        pkt[base + 1] = ev[1];
+        pkt[base + 2] = ev[2];
+        pkt[base + 3] = ev[3];
+      });
+    } else {
+      const memOffset = chunkIndex * 0x34 + 6;
+      pkt[4] = memOffset & 0xff;
+      pkt[5] = (memOffset >> 8) & 0xff;
+      pkt[6] = chunkEvents.length * 4;
+
+      chunkEvents.forEach((ev, idx) => {
+        const base = 7 + idx * 4;
+        pkt[base] = ev[0];
+        pkt[base + 1] = ev[1];
+        pkt[base + 2] = ev[2];
+        pkt[base + 3] = ev[3];
+      });
+    }
+
+    packets.push(pkt);
+  }
+
+  return packets;
 }

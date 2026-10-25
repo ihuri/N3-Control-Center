@@ -1,15 +1,22 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import {
+  BUTTON_TARGETS,
   DEBOUNCE_LIMITS,
   DPI_LIMITS,
   LIGHT_MODES,
+  MOUSE_ACTIONS,
+  MEDIA_ACTIONS,
   POLLING_LED_INDICATOR,
   RGB_PRESET_COLORS,
+  SYSTEM_SHORTCUTS,
   formatHexPacket,
+  parseMacroSequenceString,
   parseRgbColor,
+  resolveButtonNumber,
 } from './protocol.js';
 import {
+  cloneDefaultButtons,
   cloneDefaultProfile,
   getDefaultStatePath,
   loadSavedProfile,
@@ -30,6 +37,8 @@ Comandos:
   rate <125|500|1000>         Ajusta o Polling Rate (adapta automaticamente cabo vs. 2.4GHz)
   debounce <0..20>            Ajusta o Debounce Time (Keypress Response) em milissegundos
   sensor [opções]             Ajusta LOD (low/high) e recursos PAW3395 (Ripple, Angle Snap, Motion Sync)
+  button <1..7|list|reset>    Remapeia qualquer um dos 7 botões físicos (Report 0x52 op 0x52, 65B)
+  macro [opções]               Faz upload paginado de macro onboard em um botão (Report 0x52 op 0x55, 65B)
   rgb [opções]                Envia comandos OEM de iluminação RGB (opcodes 0x22..0x27)
   apply [--file perfil.json]  Aplica todas as configurações do perfil salvo (ou arquivo JSON)
   monitor                     Monitora eventos em tempo real (Input Report 0x54: DPI, bateria, repouso)
@@ -48,6 +57,28 @@ Opções de 'sensor':
   --angle-snap <on|off>       Correção linear de trajetória (Angle Snapping)
   --motion-sync <on|off>      Sincronização de movimento PAW3395 (Motion Sync)
 
+Opções de 'button':
+  n3ctl button list                                 Lista o mapeamento salvo dos 7 botões
+  n3ctl button reset --confirm                      Restaura apenas os 7 botões (0x51 0x0B 0x01 0x01)
+  --mouse <ação>              ${Object.keys(MOUSE_ACTIONS).join(' | ')}
+  --combo <atalho>            Atalho de teclado/macOS (ex.: cmd+c, cmd+shift+4, ctrl+tab, f13)
+  --media <ação>              ${Object.keys(MEDIA_ACTIONS).join(' | ')}
+  --dpi <ação>                loop | dpi-up | dpi-down
+  --system <atalho>           ${Object.keys(SYSTEM_SHORTCUTS).join(' | ')}
+  --light <ação>              effect-switch | speed-switch | color-switch | brightness-switch
+  --turbo <botão>             left | right | middle | button-4 | button-5 (use --interval e --repeat)
+  --disable                   Desativa o botão físico selecionado
+
+Opções de 'macro':
+  n3ctl macro list                                  Lista macros salvas no perfil local
+  --button <1..7>             Botão físico onde a macro será gravada
+  --seq <expressão>           Sequência rápida (ex.: "cmd+c,delay:40,cmd+v" ou "click:left,delay:25")
+  --file <macro.json>         Arquivo JSON com eventos de macro (key-down/up, mouse-down/up, delay, move)
+  --loop <count|hold|toggle>  Modo de repetição: N vezes (count), segurando (hold) ou alternar (toggle)
+  --repeat <1..65535>         Número de repetições quando --loop count (padrão: 1)
+  --hold-ms <1..65535>        Tempo padrão de pressionamento em --seq (padrão: 15 ms)
+  --name <identificador>      Salva a macro com nome na biblioteca local
+
 Opções de 'rgb':
   --mode <modo>               off | static | breathing | spectrum | wave | marquee | neon
   --color <#RRGGBB|preset>    Cor hex ou preset (${Object.keys(RGB_PRESET_COLORS).join(', ')})
@@ -56,7 +87,7 @@ Opções de 'rgb':
 
 Opções Globais:
   --mode <auto|wired|wireless> Seleciona transporte (ou modo de iluminação quando usado em 'rgb')
-  --dry-run                    Simula envio e exibe os pacotes HID de 21 bytes em hexadecimal
+  --dry-run                    Simula envio e exibe os pacotes HID (21B/65B) em hexadecimal
   --verbose                    Exibe todos os quadros HID enviados/recebidos
   --json                       Formata a saída em JSON
   --state-file <caminho>       Caminho alternativo para o cache de perfil local
@@ -69,7 +100,9 @@ Exemplos:
   n3ctl rate 1000
   n3ctl debounce 4
   n3ctl sensor --lod low --motion-sync on --angle-snap off --ripple off
-  n3ctl rgb --rgb-mode static --color #00FFAA --brightness 128 --dry-run
+  n3ctl button 4 --combo cmd+c
+  n3ctl button 5 --media play-pause
+  n3ctl macro --button 4 --seq "cmd+c,delay:40,cmd+v" --loop count --repeat 1
 `;
 
 function parseBoolToggle(val, flagName) {
@@ -95,7 +128,10 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: consol
       json: { type: 'boolean', default: false },
       confirm: { type: 'boolean', default: false },
       'include-rgb': { type: 'boolean', default: false },
+      'include-buttons': { type: 'boolean', default: false },
       'all-collections': { type: 'boolean', default: false },
+      disable: { type: 'boolean', default: false },
+      'force-no-left': { type: 'boolean', default: false },
       connection: { type: 'string' },
       mode: { type: 'string' },
       'rgb-mode': { type: 'string' },
@@ -111,6 +147,21 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: consol
       color: { type: 'string' },
       brightness: { type: 'string' },
       speed: { type: 'string' },
+      mouse: { type: 'string' },
+      combo: { type: 'string' },
+      media: { type: 'string' },
+      dpi: { type: 'string' },
+      system: { type: 'string' },
+      light: { type: 'string' },
+      turbo: { type: 'string' },
+      interval: { type: 'string' },
+      repeat: { type: 'string' },
+      button: { type: 'string' },
+      seq: { type: 'string' },
+      tap: { type: 'string' },
+      loop: { type: 'string' },
+      'hold-ms': { type: 'string' },
+      name: { type: 'string' },
       file: { type: 'string' },
       'state-file': { type: 'string' },
     },
@@ -168,6 +219,49 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: consol
           `    VID:PID=${toHexId(d.vendorId)}:${toHexId(d.productId)} | UsagePage=${toHexId(d.usagePage ?? 0)} Usage=${toHexId(d.usage ?? 0)} | Interface=${d.interface ?? 'N/A'}\n` +
           `    Produto="${d.product ?? 'N/A'}" | Fabricante="${d.manufacturer ?? 'N/A'}"\n` +
           `    Path=${d.path ?? 'indisponível'}`,
+      );
+    }
+    return 0;
+  }
+
+  if ((command === 'button' || command === 'btn') && positionals[1]?.toLowerCase() === 'list') {
+    const profile = loadSavedProfile(statePath);
+    if (jsonOutput) {
+      io.stdout(JSON.stringify({ buttons: profile.buttons, targets: BUTTON_TARGETS }, null, 2));
+      return 0;
+    }
+    io.stdout('Mapeamento atual dos 7 botões (perfil local):');
+    for (let b = 1; b <= 7; b += 1) {
+      const meta = BUTTON_TARGETS[b];
+      const cfg = profile.buttons[b];
+      const detail =
+        cfg.action ??
+        cfg.combo ??
+        cfg.macroName ??
+        (cfg.button ? `${cfg.button} (${cfg.intervalMs ?? 20}ms)` : '');
+      io.stdout(
+        `  - ${meta.label} [hwId=0x${meta.hwId.toString(16).padStart(2, '0').toUpperCase()}]: ${cfg.category}${detail ? ` (${detail})` : ''}`,
+      );
+    }
+    return 0;
+  }
+
+  if (command === 'macro' && positionals[1]?.toLowerCase() === 'list') {
+    const profile = loadSavedProfile(statePath);
+    const names = Object.keys(profile.macros ?? {});
+    if (jsonOutput) {
+      io.stdout(JSON.stringify({ macros: profile.macros ?? {} }, null, 2));
+      return 0;
+    }
+    if (names.length === 0) {
+      io.stdout('Nenhuma macro nomeada salva no perfil local.');
+      return 0;
+    }
+    io.stdout(`Macros salvas (${names.length}):`);
+    for (const macroName of names) {
+      const m = profile.macros[macroName];
+      io.stdout(
+        `  - ${macroName}: loop=${m.loopMode ?? 'count'} (${m.loopCount ?? 1}x), passos=${m.events?.length ?? 0}`,
       );
     }
     return 0;
@@ -507,6 +601,7 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: consol
       }
       const packets = await device.applyProfile(targetProfile, {
         includeRgb: Boolean(values['include-rgb']),
+        includeButtons: Boolean(values['include-buttons']),
       });
       if (!dryRun) {
         saveProfile(targetProfile, statePath);
@@ -561,6 +656,213 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: consol
       } else {
         io.stdout(
           `Comando de restauração de fábrica (0x51 0x0B 0xAA) ${dryRun ? 'simulado' : 'enviado'} com sucesso.`,
+        );
+      }
+      return 0;
+    }
+
+    if (command === 'button' || command === 'btn') {
+      const subTarget = positionals[1]?.toLowerCase();
+      if (!subTarget) {
+        throw new RangeError(
+          'Informe o botão físico (1..7), "list" ou "reset": ex.: n3ctl button 4 --combo cmd+c',
+        );
+      }
+
+      if (subTarget === 'reset') {
+        if (!values.confirm && !dryRun) {
+          throw new Error(
+            'Confirmação necessária: execute "n3ctl button reset --confirm" para restaurar os 7 botões.',
+          );
+        }
+        const packet = await device.resetButtons();
+        profile.buttons = cloneDefaultButtons();
+        if (!dryRun) {
+          saveProfile(profile, statePath);
+        }
+        if (jsonOutput) {
+          io.stdout(
+            JSON.stringify(
+              {
+                ok: true,
+                dryRun,
+                mode: device.mode,
+                buttons: profile.buttons,
+                packetHex: formatHexPacket(packet),
+              },
+              null,
+              2,
+            ),
+          );
+        } else {
+          io.stdout(
+            `Padrões dos 7 botões restaurados (${dryRun ? 'simulação' : 'aplicado'} — 0x51 0x0B 0x01 0x01).`,
+          );
+        }
+        return 0;
+      }
+
+      const btnNum = resolveButtonNumber(subTarget);
+      let actionConfig = null;
+
+      if (values.disable) {
+        actionConfig = { category: 'disable' };
+      } else if (values.mouse !== undefined) {
+        actionConfig = { category: 'mouse', action: String(values.mouse) };
+      } else if (values.combo !== undefined) {
+        actionConfig = { category: 'combo', combo: String(values.combo) };
+      } else if (values.media !== undefined) {
+        actionConfig = { category: 'media', action: String(values.media) };
+      } else if (values.dpi !== undefined) {
+        actionConfig = { category: 'dpi', action: String(values.dpi) };
+      } else if (values.system !== undefined) {
+        actionConfig = { category: 'system', action: String(values.system) };
+      } else if (values.light !== undefined) {
+        actionConfig = { category: 'light', action: String(values.light) };
+      } else if (values.turbo !== undefined) {
+        const intervalMs = values.interval !== undefined ? Number(values.interval) : 20;
+        const repeatCount = values.repeat !== undefined ? Number(values.repeat) : 0;
+        actionConfig = {
+          category: 'turbo',
+          button: String(values.turbo),
+          intervalMs,
+          repeatCount,
+        };
+      } else {
+        throw new RangeError(
+          'Especifique a ação desejada para o botão (--mouse, --combo, --media, --dpi, --system, --light, --turbo ou --disable).',
+        );
+      }
+
+      const packet = await device.setButtonMapping(btnNum, actionConfig, {
+        currentButtons: profile.buttons,
+        allowNoLeftClick: Boolean(values['force-no-left']),
+      });
+
+      profile.buttons[btnNum] = actionConfig;
+      if (!dryRun) {
+        saveProfile(profile, statePath);
+      }
+
+      if (jsonOutput) {
+        io.stdout(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun,
+              mode: device.mode,
+              button: btnNum,
+              hwId: BUTTON_TARGETS[btnNum].hwId,
+              mapping: actionConfig,
+              packetHex: formatHexPacket(packet),
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        io.stdout(
+          `${BUTTON_TARGETS[btnNum].label} configurado como ${actionConfig.category} (${dryRun ? 'simulação' : 'aplicado'}).`,
+        );
+      }
+      return 0;
+    }
+
+    if (command === 'macro') {
+      const rawBtn = values.button ?? positionals[1];
+      if (!rawBtn) {
+        throw new RangeError(
+          'Informe o botão de destino com --button <1..7> (ex.: n3ctl macro --button 4 --seq "cmd+c,delay:40,cmd+v").',
+        );
+      }
+      const btnNum = resolveButtonNumber(rawBtn);
+      const holdMs = values['hold-ms'] !== undefined ? Number(values['hold-ms']) : 15;
+
+      let loopMode = values.loop ? String(values.loop).toLowerCase() : 'count';
+      let loopCount = values.repeat !== undefined ? Number(values.repeat) : 1;
+      let events = null;
+      let macroName = values.name ? String(values.name).trim() : null;
+
+      const seqInput = values.seq ?? values.tap;
+      if (values.file) {
+        const parsedFile = JSON.parse(fs.readFileSync(String(values.file), 'utf8'));
+        if (Array.isArray(parsedFile)) {
+          events = parsedFile;
+        } else if (parsedFile && typeof parsedFile === 'object') {
+          events = parsedFile.events;
+          if (!values.loop && parsedFile.loopMode) loopMode = String(parsedFile.loopMode);
+          if (values.repeat === undefined && Number.isInteger(parsedFile.loopCount)) {
+            loopCount = parsedFile.loopCount;
+          }
+          if (!macroName && typeof parsedFile.name === 'string') {
+            macroName = parsedFile.name;
+          }
+        }
+      } else if (seqInput) {
+        events = parseMacroSequenceString(String(seqInput), holdMs);
+      } else if (macroName && profile.macros?.[macroName]) {
+        const saved = profile.macros[macroName];
+        events = saved.events;
+        if (!values.loop && saved.loopMode) loopMode = saved.loopMode;
+        if (values.repeat === undefined && Number.isInteger(saved.loopCount)) {
+          loopCount = saved.loopCount;
+        }
+      } else {
+        throw new RangeError(
+          'Informe os passos da macro via --seq "cmd+c,delay:40,cmd+v" ou --file macro.json.',
+        );
+      }
+
+      const packets = await device.bindMacro(
+        btnNum,
+        { loopMode, loopCount, events },
+        {
+          currentButtons: profile.buttons,
+          allowNoLeftClick: Boolean(values['force-no-left']),
+        },
+      );
+
+      const storedMacro = {
+        ...(macroName ? { name: macroName } : {}),
+        loopMode,
+        loopCount,
+        events,
+      };
+      if (macroName) {
+        profile.macros[macroName] = storedMacro;
+      }
+      profile.buttons[btnNum] = {
+        category: 'macro',
+        ...(macroName ? { macroName } : {}),
+        loopMode,
+        loopCount,
+        events,
+      };
+      if (!dryRun) {
+        saveProfile(profile, statePath);
+      }
+
+      if (jsonOutput) {
+        io.stdout(
+          JSON.stringify(
+            {
+              ok: true,
+              dryRun,
+              mode: device.mode,
+              button: btnNum,
+              hwId: BUTTON_TARGETS[btnNum].hwId,
+              loopMode,
+              loopCount,
+              chunkCount: packets.length,
+              packetsHex: packets.map((p) => formatHexPacket(p)),
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        io.stdout(
+          `Macro gravada em ${BUTTON_TARGETS[btnNum].label} (${packets.length} pacote(s) de 65 bytes — ${dryRun ? 'simulação' : 'aplicado'}).`,
         );
       }
       return 0;

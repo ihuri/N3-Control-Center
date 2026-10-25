@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  DEFAULT_BUTTON_MAPPINGS,
   DEVICE_TARGETS,
   REPORT_ID,
   REPORT_LENGTH,
@@ -10,15 +11,20 @@ import {
   decodeInputReport,
   encodeActiveStateQueryPacket,
   encodeBatteryQueryPacket,
+  encodeButtonMappingPacket,
+  encodeButtonResetPacket,
   encodeDebouncePacket,
   encodeDpiPacket,
   encodeFactoryResetPacket,
   encodeFirmwareQueryPacket,
+  encodeMacroPackets,
   encodePollingRatePacket,
   encodeRgbSequence,
   encodeSensorPacket,
   encodeWirelessPingPacket,
   formatHexPacket,
+  hasLeftClickAssigned,
+  resolveButtonNumber,
 } from './protocol.js';
 
 let cachedHidModule = null;
@@ -472,7 +478,7 @@ export class N3Device {
     return sent;
   }
 
-  async applyProfile(profile, { includeRgb = false } = {}) {
+  async applyProfile(profile, { includeRgb = false, includeButtons = false } = {}) {
     const packets = [];
     packets.push(
       await this.setDpi({
@@ -494,6 +500,96 @@ export class N3Device {
     if (includeRgb && profile.rgb) {
       const rgbPackets = await this.setRgbLighting(profile.rgb);
       packets.push(...rgbPackets);
+    }
+    if (includeButtons && profile.buttons) {
+      // Aplica primeiro botões mapeados como left-click (suporta inversão canhota sem bloqueio transitório)
+      const entries = Object.entries(profile.buttons)
+        .map(([k, v]) => [resolveButtonNumber(k), v])
+        .sort(([, a], [, b]) => {
+          const aLeft = a?.category === 'mouse' && a?.action === 'left-click' ? 0 : 1;
+          const bLeft = b?.category === 'mouse' && b?.action === 'left-click' ? 0 : 1;
+          return aLeft - bLeft;
+        });
+
+      for (const [btnNum, cfg] of entries) {
+        if (!cfg) continue;
+        if (cfg.category === 'macro') {
+          const macroDef = cfg.events ? cfg : profile.macros?.[cfg.macroName];
+          if (macroDef?.events) {
+            const macroPkts = await this.bindMacro(btnNum, macroDef, {
+              currentButtons: profile.buttons,
+            });
+            packets.push(...macroPkts);
+          }
+        } else {
+          packets.push(
+            await this.setButtonMapping(btnNum, cfg, {
+              currentButtons: profile.buttons,
+            }),
+          );
+        }
+      }
+    }
+    return packets;
+  }
+
+  _assertLeftClickSafety(buttonNumber, nextActionConfig, { currentButtons, allowNoLeftClick = false } = {}) {
+    if (allowNoLeftClick) return;
+    const merged = {
+      ...DEFAULT_BUTTON_MAPPINGS,
+      ...(currentButtons ?? {}),
+      [buttonNumber]: nextActionConfig,
+    };
+    if (!hasLeftClickAssigned(merged)) {
+      const err = new Error(
+        'Proteção de segurança: pelo menos um botão físico precisa permanecer mapeado como Clique Esquerdo (left-click). Mapeie outro botão para left-click antes ou use allowNoLeftClick / --force-no-left.',
+      );
+      err.code = 'LEFT_CLICK_REQUIRED';
+      throw err;
+    }
+  }
+
+  async setButtonMapping(button, actionConfig, options = {}) {
+    const btnNum = resolveButtonNumber(button);
+    this._assertLeftClickSafety(btnNum, actionConfig, options);
+    const packet = encodeButtonMappingPacket(btnNum, actionConfig);
+    this.transport.sendFeatureReport(
+      packet,
+      `Configurar Botão ${btnNum} (${actionConfig.category}${actionConfig.action ? `:${actionConfig.action}` : ''})`,
+    );
+    await delay(this.interPacketDelayMs);
+    return packet;
+  }
+
+  async disableButton(button, options = {}) {
+    return this.setButtonMapping(button, { category: 'disable' }, options);
+  }
+
+  async resetButtons() {
+    const packet = encodeButtonResetPacket();
+    this.transport.sendFeatureReport(
+      packet,
+      'Restaurar padrões dos 7 botões (0x51 0x0B 0x01 0x01)',
+    );
+    await delay(this.interPacketDelayMs);
+    return packet;
+  }
+
+  async bindMacro(button, { loopMode = 'count', loopCount = 1, events }, options = {}) {
+    const btnNum = resolveButtonNumber(button);
+    this._assertLeftClickSafety(btnNum, { category: 'macro' }, options);
+    const packets = encodeMacroPackets({
+      button: btnNum,
+      loopMode,
+      loopCount,
+      events,
+    });
+    for (let i = 0; i < packets.length; i += 1) {
+      this.transport.sendFeatureReport(
+        packets[i],
+        `Upload de Macro no Botão ${btnNum} (bloco ${i + 1}/${packets.length})`,
+      );
+      await delay(this.interPacketDelayMs);
     }
     return packets;
   }

@@ -1,12 +1,18 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_PROFILE, parseRgbColor } from './protocol.js';
+import { DEFAULT_BUTTON_MAPPINGS, DEFAULT_PROFILE, parseRgbColor } from './protocol.js';
 
 export function getDefaultStatePath() {
   const configRoot =
     process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return path.join(configRoot, 'n3-control-center', 'state.json');
+}
+
+export function cloneDefaultButtons() {
+  return Object.fromEntries(
+    Object.entries(DEFAULT_BUTTON_MAPPINGS).map(([btn, cfg]) => [btn, { ...cfg }]),
+  );
 }
 
 export function cloneDefaultProfile() {
@@ -24,6 +30,8 @@ export function cloneDefaultProfile() {
       brightness: DEFAULT_PROFILE.rgb.brightness,
       speed: DEFAULT_PROFILE.rgb.speed,
     },
+    buttons: cloneDefaultButtons(),
+    macros: {},
   };
 }
 
@@ -86,6 +94,22 @@ export function normalizeProfile(raw = {}) {
         ? raw.rgb.speed
         : base.rgb.speed,
     },
+    buttons: (() => {
+      const normalizedButtons = cloneDefaultButtons();
+      if (raw.buttons && typeof raw.buttons === 'object') {
+        for (let btn = 1; btn <= 7; btn += 1) {
+          const entry = raw.buttons[btn] ?? raw.buttons[String(btn)];
+          if (entry && typeof entry === 'object' && typeof entry.category === 'string') {
+            normalizedButtons[btn] = { ...entry };
+          }
+        }
+      }
+      return normalizedButtons;
+    })(),
+    macros:
+      raw.macros && typeof raw.macros === 'object' && !Array.isArray(raw.macros)
+        ? JSON.parse(JSON.stringify(raw.macros))
+        : {},
   };
 }
 

@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* Scrollbar escura discreta compatível com as caixas OEM #05070a e #6d6e71 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 18, 24, 0.65);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(125, 130, 140, 0.65);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(210, 214, 222, 0.85);
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}

@@ -1,24 +1,63 @@
 {
   "name": "n3-control-center",
   "version": "1.0.0",
-  "description": "Utilitário de configuração para macOS do mouse Darmoshark N3 via USB HID (engenharia reversa do driver oficial v1.0.7.2)",
+  "author": "Ihuri Barboza",
+  "description": "Utilitário Desktop (macOS Menu Bar / Hidden Bar) e CLI para o mouse Darmoshark N3 via USB HID",
   "type": "module",
   "bin": {
     "n3ctl": "./bin/n3ctl.js"
   },
-  "main": "./src/index.js",
+  "main": "./electron/main.js",
   "exports": {
     ".": "./src/index.js",
     "./protocol": "./src/protocol.js",
+    "./keymap": "./src/keymap.js",
     "./device": "./src/device.js",
-    "./state": "./src/state.js"
+    "./state": "./src/state.js",
+    "./app-store": "./src/app-store.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start": "node ./bin/n3ctl.js",
+    "cli": "node ./bin/n3ctl.js",
+    "dev:ui": "vite",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && ELECTRON_RENDERER_URL=http://localhost:5173 electron .\"",
+    "start": "vite build && electron .",
+    "build": "vite build",
+    "pack:mac": "vite build && electron-builder --mac --dir",
+    "dist:mac": "vite build && electron-builder --mac dmg",
     "test": "node --test"
+  },
+  "build": {
+    "appId": "com.n3controlcenter.macos",
+    "productName": "N3 Control Center",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/node-hid/**",
+      "**/electron/assets/**"
+    ],
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "electron/assets/icon.png",
+      "identity": null,
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "extendInfo": {
+        "LSUIElement": false
+      }
+    }
   },
   "keywords": [
     "darmoshark",
@@ -26,11 +65,25 @@
     "paw3395",
     "usb-hid",
     "node-hid",
+    "electron",
     "macos",
+    "menubar",
     "mouse"
   ],
   "license": "MIT",
   "dependencies": {
-    "node-hid": "^3.1.2"
+    "node-hid": "^3.1.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.12",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.2.0",
+    "wait-on": "^8.0.2"
   }
 }
